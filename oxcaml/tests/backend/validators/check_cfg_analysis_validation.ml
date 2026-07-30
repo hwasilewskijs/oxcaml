@@ -142,6 +142,66 @@ let test_tailcall_self () =
            (Tailcall_self { destination = entry_label })) ]
   |> validate_liveness
 
+let random_reachable_cfg seed =
+  let state = Random.State.make [| seed |] in
+  let block_count = 1 + Random.State.int state 20 in
+  let successors = Array.make block_count [] in
+  let has_capacity index = List.compare_length_with successors.(index) 2 < 0 in
+  let add_edge source target =
+    if
+      has_capacity source
+      && not (List.exists (Int.equal target) successors.(source))
+    then successors.(source) <- target :: successors.(source)
+  in
+  for target = 1 to block_count - 1 do
+    let rec choose_parent () =
+      let parent = Random.State.int state target in
+      if has_capacity parent then parent else choose_parent ()
+    in
+    add_edge (choose_parent ()) target
+  done;
+  if block_count > 1
+  then
+    for _ = 1 to 2 * block_count do
+      let source = Random.State.int state block_count in
+      let target = 1 + Random.State.int state (block_count - 1) in
+      add_edge source target
+    done;
+  let labels =
+    Array.init block_count (fun index ->
+        if index = 0 then entry_label else new_label index)
+  in
+  List.init block_count (fun index ->
+      let terminator =
+        match successors.(index) with
+        | [] -> terminator ~arg:[| int.(0) |] Return
+        | [target] -> terminator (Always labels.(target))
+        | [left; right] ->
+          terminator
+            ~arg:[| int.(0) |]
+            (Truth_test { ifso = labels.(left); ifnot = labels.(right) })
+        | _ -> assert false
+      in
+      block labels.(index) terminator)
+  |> make_cfg
+
+let test_random_dominators () =
+  for seed = 0 to 999 do
+    let cfg_with_infos = random_reachable_cfg seed in
+    let cfg = Cfg_with_infos.cfg cfg_with_infos in
+    match
+      Misc.protect_refs
+        [R (Oxcaml_flags.cfg_dominators_validate, true)]
+        (fun () -> ignore (Cfg_dominators.build cfg : Cfg_dominators.t))
+    with
+    | () -> ()
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      Format.eprintf "Dominator fuzz failure, seed %d:@.%a@." seed Printcfg.cfg
+        cfg;
+      Printexc.raise_with_backtrace exn backtrace
+  done
+
 let () =
   test_diamond ();
   test_nested_loops ();
@@ -149,4 +209,5 @@ let () =
   test_dead_pure_and_impure ();
   test_exception_handler ();
   test_unreachable ();
-  test_tailcall_self ()
+  test_tailcall_self ();
+  test_random_dominators ()
