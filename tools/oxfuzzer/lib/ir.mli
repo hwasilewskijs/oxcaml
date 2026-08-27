@@ -78,6 +78,7 @@ module Expr : sig
   type t =
     | Const of Number.t
     | Var of Name.t
+    | Opaque of t
     | Bin_op of
         { ty : Ty.t;
           op : Bin_op.t;
@@ -108,7 +109,7 @@ module Statement : sig
     | Seq of t list
     | If of Expr.t * t * t
     | Let_mutable of Name.t * Expr.t * t
-    | Bounded_loop of Name.t * int * t
+    | Bounded_loop of Name.t * Expr.t * t
 
   val let_mutable :
     Name.t ->
@@ -119,10 +120,18 @@ module Statement : sig
   val to_code : t -> Parsetree.expression
 end
 
+module Inline : sig
+  type t =
+    | Never
+    | Always
+    | Default
+end
+
 module Function : sig
   type t =
     { name : Name.t;
       params : (Name.t * Ty.t) list;
+      inline : Inline.t;
       body : Statement.t;
       return_ty : NumberTy.t;
       result : Expr.t

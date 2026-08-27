@@ -184,7 +184,17 @@ let print_number nty e =
     (qualified_ident "Printf" "printf")
     [Exp.constant (Const.string fmt); arg]
 
+(* Whenever new libraries are added here, make sure `library_flags` from
+   `oxfuzzer.py` is also updated. *)
+let libraries = ["stdlib_upstream_compatible"; "stdlib_stable"]
+
 let to_code { functions; main_decls = decls; main_statement = statement } =
+  let opens =
+    List.map
+      (fun lib ->
+        Str.open_ (Opn.mk (Mod.ident (lid (String.capitalize_ascii lib)))))
+      libraries
+  in
   let print_decl (name, ty, _expr) =
     match ty with
     | Ty.Number nty -> print_number nty (ident (Name.to_string name))
@@ -200,11 +210,7 @@ let to_code { functions; main_decls = decls; main_statement = statement } =
   let body =
     List.fold_right
       (fun (name, _ty, expr) acc ->
-        Statement.let_mutable name
-          (Exp.apply
-             (qualified_ident "Sys" "opaque_identity")
-             [Nolabel, Expr.to_code expr])
-          acc)
+        Statement.let_mutable name (Expr.to_code expr) acc)
       decls body
   in
   let main =
@@ -215,7 +221,7 @@ let to_code { functions; main_decls = decls; main_statement = statement } =
   in
   let run = Str.eval (Exp.apply (ident "main") [Nolabel, unit_]) in
   let structure =
-    conversions @ integral_bounds @ [canonicalize_nan]
+    opens @ conversions @ integral_bounds @ [canonicalize_nan]
     @ float_to_integral_conversions
     @ List.map Function.to_code functions
     @ [main; run]
